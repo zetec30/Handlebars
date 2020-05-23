@@ -4,7 +4,7 @@ module.exports = {
             if (req.isAuthenticated()) {
                 return next();
             } else {
-                res.redirect('/PacMan');
+                res.redirect('/');
             }
         } catch (err) {
             console.log(err.message);

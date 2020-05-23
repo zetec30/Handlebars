@@ -1,22 +1,29 @@
 var express = require('express');
 var app = express();
-
+var cookieParser = require('cookie-parser');
 var mongoose = require('mongoose');
 var bodyParser = require('body-parser');
-//Require the handlebars express package
+var crypto = require('crypto');//used to reset token on forgot password
+
+var nodemailer = require('nodemailer')
 var handlebars = require('express-handlebars');
 var bcrypt = require('bcryptjs');
+var flash = require('express-flash');
+var async = require('async');
 const passport = require('passport');
 const session = require('express-session');
+
+const port = process.env.PORT || 3003;// .env should be in a seperate file for security reasons/port no this case 3003
+const mongoURL = process.env.MONGOURL || 'mongodb+srv://mike:DIgitalcat14!@cluster0-fssfj.mongodb.net/Pacman-515?retryWrites=true&w=majority';//atlas database link
 
 const { isAuth } = require('./middleware/isAuth');
 require('./middleware/passport')(passport);
 
-// const Contact = require('./models/Contact');
+
 const User = require('./models/User');
 
 app.use(express.static('public'));
-
+app.use(cookieParser());
 app.use(
     session({
         secret: 'secret',
@@ -25,7 +32,7 @@ app.use(
         cookie: { maxAge: 60000 }
     })
 );
-
+app.use(flash());
 app.use(passport.initialize());
 app.use(passport.session());
 //We Use body Parser to structure the request into a format that is simple to use
@@ -39,10 +46,10 @@ app.engine('hbs', handlebars({
     layoutsDir: __dirname + '/views/layouts',
     extname: 'hbs'
 }))
-
+//index page
 app.get('/', (req, res) => {
     try {
-        res.render('login', { layout: 'main' });
+        res.render('login', { layout: 'main', user: req.user });
     } catch (err) {
         console.log(err.message);
         res.status(500).send('Server Error')
@@ -50,23 +57,6 @@ app.get('/', (req, res) => {
 
 })
 
-//Pacman view
-app.get('/PacMan', isAuth, (req, res) => {
-    try {
-        Contact.find({ user: req.user.id }).lean()
-            .exec((err, contacts) => {
-                if (contacts.length) {
-                    res.render('PacMan', { layout: 'pacman', contacts: contacts, contactsExist: true, username: req.user.username });
-                } else {
-                    res.render('PacMan', { layout: 'pacman', contacts: contacts, contactsExist: false });
-                }
-            });
-    } catch (err) {
-        console.log(err.message);
-        res.status(500).send('Server Error')
-    }
-
-});
 
 app.get('/signout', (req, res) => {
     //Logs the logged in user out and redirects to the sign in page
@@ -74,12 +64,74 @@ app.get('/signout', (req, res) => {
     res.redirect('/');
 })
 
+app.get('/forgot', (req, res) => {
+    res.render('forgotPass', {layout: 'resetPass',
+      user: req.user
+    });
+  });
+  app.post('/forgot', async(req, res, next) => {
+    async.waterfall([
+      (done)=> {
+        crypto.randomBytes(20, (err, buf)=> {
+          var token = buf.toString('hex');
+          done(err, token);
+        });
+      },
+      (token, done)=> {
+        User.findOne({ email: req.body.email }, (err, user)=> {
+          if (!user) {
+            req.flash('error', 'No account with that email address exists.');
+            return res.redirect('/forgot');
+          }
+  
+          user.resetPasswordToken = token;
+          user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
+  
+          user.save((err)=> {
+            done(err, token, user);
+          });
+        });
+      },
+      (token, user, done) => {
+        var Transport = nodemailer.createTransport('SMTP', {
+          host: 'smtp.gmail.com',
+          secure: false,
+          auth: {
+            user: 'austinfury3@gmail.com',
+            pass: 'Toffee2015'
+          }
+        });
+        var mailOptions = {
+          to: user.email,
+          from: 'austinfury2@gmail.com',
+          subject: 'pacman password reset',
+          text: 'You are receiving this because you (or someone else) have requested the reset of the password for your account.\n\n' +
+            'Please click on the following link, or paste this into your browser to complete the process:\n\n' +
+            'http://' + req.headers.host + '/reset/' + token + '\n\n' +
+            'If you did not request this, please ignore this email and your password will remain unchanged.\n'
+        };
+        Transport.sendMail(mailOptions, (err) => {
+          req.flash('info', 'An e-mail has been sent to ' + user.email + ' with further instructions.');
+          done(err, 'done');
+        });
+      }
+    ], (err) => {
+      if (err) return next(err);
+      res.redirect('/forgot');
+    });
+  });
+//when not needing a player name this redirects button to Pacman game.
+app.get('/PacMan', isAuth, (req, res) => {
+    res.render('PacMan', {layout: 'pacman',
+        user: req.user
+      });
+    });
+  
 
 //POST Signup
 app.post('/signup', async (req, res) => {
-    const { username, password, highscore } = req.body;
+    const { email, username, password, highscore } = req.body;
     try {
-
         let user = await User.findOne({ username });
         //If user exists stop the process and render login view with userExist true
         if (user) {
@@ -87,8 +139,10 @@ app.post('/signup', async (req, res) => {
         }
         //If user does not exist, then continue
         user = new User({
-            username,
-            password,
+            user: req.user,
+            email,
+            username: req.body.username,
+            password: req.body.password,
             highscore
         });
         //Salt Generation
@@ -103,12 +157,11 @@ app.post('/signup', async (req, res) => {
         res.status(500).send('Server Error')
     }
 })
-//Dashboard view
-
+//sign in
 app.post('/signin', (req, res, next) => {
     try {
         passport.authenticate('local', {
-            successRedirect: '/PacMan',
+            successRedirect: '/PacMan', user: req.user,
             failureRedirect: '/?incorrectLogin'
         })(req, res, next)
     } catch (err) {
@@ -118,28 +171,11 @@ app.post('/signin', (req, res, next) => {
 
 })
 
-app.post('/addContact', (req, res) => {
-    //Uses destructuring to extract name, email and number from the req
-    const { name, Username} = req.body;
-    try {
-        let contact = new Contact({
-            user: req.user.id,
-            name
-            
-            
-            
-        });
 
-        contact.save()
-        res.redirect('/PacMan?contactSaved');
-    } catch (err) {
-        console.log(err.message);
-        res.status(500).send('Server Error')
-    }
 
-})
 
-mongoose.connect('mongodb+srv://mike:DIgitalcat14!@cluster0-fssfj.mongodb.net/Pacman-515?retryWrites=true&w=majority', {
+
+mongoose.connect(mongoURL, {
     useUnifiedTopology: true,
     useNewUrlParser: true
 })
@@ -150,7 +186,7 @@ mongoose.connect('mongodb+srv://mike:DIgitalcat14!@cluster0-fssfj.mongodb.net/Pa
         console.log('Not Connected to DB : ' + err);//Upon unuccessful connection, we are using a Javasctipt .catch block here to give us a message in in our console with err displayed so that we can see what the issue is.
     });
 
-//Listening for requests on port 3000
-app.listen(3000, () => {
-    console.log('Server listening on port 3000');
+//Listening for requests on port 3003
+app.listen(port, () => {
+    console.log(`Server listening on port ${port}`);
 });

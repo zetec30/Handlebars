@@ -1,4 +1,4 @@
-
+const email = document.querySelector('#email');
 const username = document.querySelector('#username');
 const signUpSubmit = document.querySelector('#signUpSubmit');
 const password = document.querySelector('#password');
@@ -24,6 +24,4 @@ if (queryString == '?incorrectLogin') {
     messageContainer.innerHTML = `<div class="card-panel red">Incorrect Log In Details</div>`;
 }
 
-if (queryString == '?contactSaved') {
-    messageContainer.innerHTML = `<div class="card-panel green">Contact Saved</div>`;
-}
+

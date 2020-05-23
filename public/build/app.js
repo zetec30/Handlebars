@@ -1,5 +1,4 @@
 
-
 class Ghost {
   constructor(
     scaledTileSize, mazeArray, pacman, name, level, characterUtil, blinky,
@@ -1963,9 +1962,9 @@ class GameCoordinator {
   /**
    * Displays GAME OVER text and displays the menu so players can play again
    */
-  gameOver() {
+  gameOver( ) {
     localStorage.setItem('highScore', this.highScore);
-
+      console.log("highscore");
     new Timer(() => {
       this.displayText(
         {
